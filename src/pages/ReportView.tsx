@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import {
-  ArrowLeft, Loader2, Download, Trash2, AlertCircle, FileText, FileType, FileSpreadsheet,
-} from 'lucide-react'
+import { ArrowLeft, Loader as Loader2, Download, Trash2, CircleAlert as AlertCircle, FileText, FileType, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Report, ReportFormat } from '../types'
 

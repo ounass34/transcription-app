@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, FileText, Trash2, Edit2, X, Loader2, AlertCircle } from 'lucide-react'
+import { Plus, FileText, Trash2, CreditCard as Edit2, X, Loader as Loader2, CircleAlert as AlertCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import type { Template } from '../types'

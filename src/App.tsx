@@ -7,7 +7,7 @@ import UploadPage from './pages/UploadPage'
 import TranscriptionDetail from './pages/TranscriptionDetail'
 import TemplatesPage from './pages/TemplatesPage'
 import ReportView from './pages/ReportView'
-import { Loader2 } from 'lucide-react'
+import { Loader as Loader2 } from 'lucide-react'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()

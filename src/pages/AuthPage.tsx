@@ -1,16 +1,18 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AudioLines, Loader2, Mail, Lock, User } from 'lucide-react'
+import { AudioLines, Loader as Loader2, Mail, Lock, User } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import GoogleIcon from '../components/GoogleIcon'
 
 export default function AuthPage() {
-  const { signIn, signUp } = useAuth()
+  const { signIn, signUp, signInWithGoogle } = useAuth()
   const navigate = useNavigate()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -36,6 +38,16 @@ export default function AuthPage() {
       }
     }
     navigate('/dashboard')
+  }
+
+  const handleGoogleSignIn = async () => {
+    setError(null)
+    setGoogleLoading(true)
+    const result = await signInWithGoogle()
+    if (result.error) {
+      setError(result.error)
+      setGoogleLoading(false)
+    }
   }
 
   return (
@@ -143,7 +155,28 @@ export default function AuthPage() {
               )}
             </button>
           </form>
-        </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-neutral-200" />
+              <span className="text-xs text-neutral-400 font-medium">ou</span>
+              <div className="flex-1 h-px bg-neutral-200" />
+            </div>
+
+            {/* Google sign-in */}
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={googleLoading || loading}
+              className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-neutral-200 bg-white text-neutral-700 font-medium text-sm hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+            >
+              {googleLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin text-neutral-500" />
+              ) : (
+                <GoogleIcon className="w-4 h-4" />
+              )}
+              Continuer avec Google
+            </button>
+          </div>
 
         <p className="text-center text-xs text-neutral-400 mt-6">
           En continuant, vous acceptez nos conditions d'utilisation et notre politique de confidentialité.
@@ -152,3 +185,6 @@ export default function AuthPage() {
     </div>
   )
 }
+
+
+export default AuthPage

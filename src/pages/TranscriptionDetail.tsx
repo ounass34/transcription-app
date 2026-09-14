@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import {
-  ArrowLeft, Loader2, FileText, FileAudio, Clock, Plus, Trash2,
-  CheckCircle2, AlertCircle, Download, Sparkles, FileSpreadsheet, FileType,
-} from 'lucide-react'
+import { ArrowLeft, Loader as Loader2, FileText, FileAudio, Clock, Plus, Trash2, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Download, Sparkles, FileSpreadsheet, FileType } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import type { Transcription, Template, Report, ReportFormat } from '../types'
