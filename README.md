@@ -1,2 +1,3 @@
-# transcription-app
-plateforme web permettant aux utilisateurs d'importer ou d'enregistrer des fichiers audio/vocaux, de les transcrire automatiquement, puis de générer des comptes-rendus structurés :  Soit en respectant un template prédéfini/soumis par l'utilisateur.  Soit sous un format bureautique standard (PDF, Word, Excel).
+# Transcription & Restitution Intelligente
+
+Plateforme web permettant aux utilisateurs d'importer ou d'enregistrer des fichiers audio, de les transcrire, puis de générer des comptes-rendus structurés selon des modèles personnalisés ou dans des formats bureautiques standards.
