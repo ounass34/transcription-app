@@ -16,22 +16,12 @@ export default function UploadPage() {
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [recordingTime, setRecordingTime] = useState(0)
-  const [liveTranscript, setLiveTranscript] = useState('')
-  const [interimTranscript, setInterimTranscript] = useState('')
-  const [recognitionSupported, setRecognitionSupported] = useState(true)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
-  const finalTranscriptRef = useRef('')
-
-  useEffect(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SR) setRecognitionSupported(false)
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -43,9 +33,6 @@ export default function UploadPage() {
       }
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl)
-      }
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort() } catch { /* noop */ }
       }
     }
   }, [audioUrl])
@@ -74,49 +61,9 @@ export default function UploadPage() {
       recorder.start()
       setMode('recording')
       setRecordingTime(0)
-      setLiveTranscript('')
-      setInterimTranscript('')
-      finalTranscriptRef.current = ''
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1)
       }, 1000)
-
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (SR) {
-        const recognition = new SR()
-        recognition.lang = 'fr-FR'
-        recognition.continuous = true
-        recognition.interimResults = true
-
-        recognition.onresult = (event) => {
-          let interim = ''
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const result = event.results[i]
-            if (result.isFinal) {
-              finalTranscriptRef.current += result[0].transcript
-            } else {
-              interim += result[0].transcript
-            }
-          }
-          setLiveTranscript(finalTranscriptRef.current)
-          setInterimTranscript(interim)
-        }
-
-        recognition.onerror = (event) => {
-          if (event.error !== 'no-speech' && event.error !== 'aborted') {
-            console.warn('Speech recognition error:', event.error)
-          }
-        }
-
-        recognition.onend = () => {
-          if (mediaRecorderRef.current?.state === 'recording') {
-            try { recognition.start() } catch { /* already started */ }
-          }
-        }
-
-        recognitionRef.current = recognition
-        try { recognition.start() } catch { /* noop */ }
-      }
     } catch {
       setError("Impossible d'accéder au microphone. Vérifiez les autorisations de votre navigateur.")
     }
@@ -133,11 +80,6 @@ export default function UploadPage() {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch { /* noop */ }
-      recognitionRef.current = null
-    }
-    setInterimTranscript('')
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,9 +109,6 @@ export default function UploadPage() {
     setAudioBlob(null)
     setAudioUrl(null)
     setFileName('')
-    setLiveTranscript('')
-    setInterimTranscript('')
-    finalTranscriptRef.current = ''
   }
 
   const handleSubmit = async () => {
@@ -187,8 +126,6 @@ export default function UploadPage() {
       if (uploadError) throw uploadError
 
       const finalTitle = title.trim() || fileName.replace(/\.[^/.]+$/, '')
-      const recognizedText = finalTranscriptRef.current.trim()
-      const hasText = recognizedText.length > 0
 
       const { data, error: dbError } = await supabase
         .from('transcriptions')
@@ -196,13 +133,35 @@ export default function UploadPage() {
           title: finalTitle,
           audio_file_path: filePath,
           audio_file_name: fileName,
-          status: hasText ? 'completed' : 'pending',
-          raw_text: hasText ? recognizedText : null,
+          status: 'pending',
         })
         .select()
         .single()
 
       if (dbError) throw dbError
+
+      // Trigger the transcription edge function
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe`
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+
+      if (accessToken) {
+        fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            transcriptionId: data.id,
+            audioPath: filePath,
+            userId: user.id,
+          }),
+        }).catch((err) => {
+          console.warn('Failed to trigger transcription:', err)
+        })
+      }
 
       setMode('submitted')
       navigate(`/transcription/${data.id}`)
@@ -224,13 +183,6 @@ export default function UploadPage() {
         <h1 className="text-2xl font-bold text-neutral-900">Nouvelle transcription</h1>
         <p className="text-neutral-500 text-sm mt-1">Importez un fichier audio ou enregistrez-vous en direct</p>
       </div>
-
-      {!recognitionSupported && (
-        <div className="flex items-start gap-2 text-sm text-warning-600 bg-warning-50 border border-warning-100 rounded-xl px-4 py-3 mb-6">
-          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          La reconnaissance vocale en direct n'est pas disponible sur ce navigateur. L'enregistrement fonctionnera mais le texte devra être saisi manuellement.
-        </div>
-      )}
 
       {/* Mode selection */}
       {!audioBlob && mode !== 'recording' && (
@@ -257,7 +209,7 @@ export default function UploadPage() {
             </div>
             <div className="text-center">
               <p className="font-medium text-neutral-900 text-sm">Enregistrer en direct</p>
-              <p className="text-xs text-neutral-400 mt-0.5">Transcription automatique en direct</p>
+              <p className="text-xs text-neutral-400 mt-0.5">Utilisez votre microphone</p>
             </div>
           </button>
         </div>
@@ -273,30 +225,19 @@ export default function UploadPage() {
 
       {/* Recording state */}
       {mode === 'recording' && (
-        <div className="rounded-2xl bg-error-50/50 border border-error-100 mb-6 animate-fade-in overflow-hidden">
-          <div className="flex flex-col items-center justify-center gap-4 p-8">
-            <div className="flex items-center gap-2 text-error-600">
-              <div className="w-3 h-3 rounded-full bg-error-500 animate-pulse-slow" />
-              <span className="text-lg font-mono font-medium">{formatTime(recordingTime)}</span>
-            </div>
-            <p className="text-sm text-neutral-600">Enregistrement en cours...</p>
-            <button
-              onClick={stopRecording}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-error-500 text-white text-sm font-medium hover:bg-error-600 transition-all"
-            >
-              <Square className="w-4 h-4" />
-              Arrêter l'enregistrement
-            </button>
+        <div className="flex flex-col items-center justify-center gap-4 p-8 rounded-2xl bg-error-50/50 border border-error-100 mb-6 animate-fade-in">
+          <div className="flex items-center gap-2 text-error-600">
+            <div className="w-3 h-3 rounded-full bg-error-500 animate-pulse-slow" />
+            <span className="text-lg font-mono font-medium">{formatTime(recordingTime)}</span>
           </div>
-          {(liveTranscript || interimTranscript) && (
-            <div className="px-6 pb-5 border-t border-error-100 pt-4">
-              <p className="text-xs font-medium text-neutral-500 mb-2">Transcription en direct :</p>
-              <p className="text-sm text-neutral-700 leading-relaxed">
-                {liveTranscript}
-                <span className="text-neutral-400 italic">{interimTranscript}</span>
-              </p>
-            </div>
-          )}
+          <p className="text-sm text-neutral-600">Enregistrement en cours...</p>
+          <button
+            onClick={stopRecording}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-error-500 text-white text-sm font-medium hover:bg-error-600 transition-all"
+          >
+            <Square className="w-4 h-4" />
+            Arrêter l'enregistrement
+          </button>
         </div>
       )}
 
@@ -321,12 +262,6 @@ export default function UploadPage() {
             </button>
           </div>
           <audio src={audioUrl} controls className="w-full" />
-          {liveTranscript && (
-            <div className="mt-4 p-4 rounded-xl bg-success-50 border border-success-100">
-              <p className="text-xs font-medium text-success-700 mb-1">Texte transcrit automatiquement :</p>
-              <p className="text-sm text-neutral-700 leading-relaxed whitespace-pre-wrap">{liveTranscript}</p>
-            </div>
-          )}
         </div>
       )}
 

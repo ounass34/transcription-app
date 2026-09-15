@@ -36,15 +36,17 @@ export default function TranscriptionDetail() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    async function fetchData() {
-      if (!id) return
+    if (!id) return
+    let active = true
 
+    async function fetchData() {
       const { data: trans, error: transError } = await supabase
         .from('transcriptions')
         .select('*')
         .eq('id', id)
         .maybeSingle()
 
+      if (!active) return
       if (transError || !trans) {
         setError('Transcription introuvable.')
         setLoading(false)
@@ -60,6 +62,7 @@ export default function TranscriptionDetail() {
         .eq('transcription_id', id)
         .order('created_at', { ascending: false })
 
+      if (!active) return
       setReports(reportsData ?? [])
 
       const { data: templatesData } = await supabase
@@ -67,10 +70,39 @@ export default function TranscriptionDetail() {
         .select('*')
         .order('created_at', { ascending: false })
 
+      if (!active) return
       setTemplates(templatesData ?? [])
       setLoading(false)
     }
     fetchData()
+
+    // Poll for status updates while transcription is pending or processing
+    const pollInterval = setInterval(async () => {
+      const { data: trans } = await supabase
+        .from('transcriptions')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle()
+
+      if (!active || !trans) return
+
+      setTranscription((prev) => {
+        if (prev && prev.status !== trans.status) {
+          setRawText(trans.raw_text ?? '')
+          return trans
+        }
+        return prev
+      })
+
+      if (trans.status === 'completed' || trans.status === 'failed') {
+        clearInterval(pollInterval)
+      }
+    }, 3000)
+
+    return () => {
+      active = false
+      clearInterval(pollInterval)
+    }
   }, [id])
 
   const updateTranscription = async (updates: Partial<Transcription>) => {
