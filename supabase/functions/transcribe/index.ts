@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+const GROQ_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
+const GROQ_MODEL = "whisper-large-v3-turbo";
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -23,6 +26,7 @@ Deno.serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const groqApiKey = Deno.env.get("GROQ_API_KEY");
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -45,50 +49,48 @@ Deno.serve(async (req: Request) => {
         throw new Error(`Failed to download audio: ${downloadError?.message ?? "unknown"}`);
       }
 
-      // Get file metadata for duration estimation
       const audioBlob = fileData as Blob;
       const fileSize = audioBlob.size;
+      const audioFileName = audioPath.split("/").pop() ?? "audio";
 
-      // Send to transcription API
-      // Using a configurable API endpoint - falls back to a simple duration-based estimate
-      const transcriptionApiUrl = Deno.env.get("TRANSCRIPTION_API_URL");
-      const transcriptionApiKey = Deno.env.get("TRANSCRIPTION_API_KEY");
+      let transcribedText: string;
+      let audioDuration: number | null = null;
 
-      let transcribedText: string | null = null;
-
-      if (transcriptionApiUrl && transcriptionApiKey) {
-        // Send audio to external transcription service
+      if (groqApiKey) {
+        // Send audio to Groq Whisper API for transcription
         const formData = new FormData();
-        formData.append("audio", audioBlob, audioPath.split("/").pop() ?? "audio");
+        formData.append("file", audioBlob, audioFileName);
+        formData.append("model", GROQ_MODEL);
+        formData.append("response_format", "verbose_json");
         formData.append("language", "fr");
 
-        const apiResponse = await fetch(transcriptionApiUrl, {
+        const apiResponse = await fetch(GROQ_API_URL, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${transcriptionApiKey}`,
+            "Authorization": `Bearer ${groqApiKey}`,
           },
           body: formData,
         });
 
         if (!apiResponse.ok) {
-          throw new Error(`Transcription API error: ${apiResponse.status}`);
+          const errBody = await apiResponse.text();
+          throw new Error(`Groq API error (${apiResponse.status}): ${errBody}`);
         }
 
         const apiResult = await apiResponse.json();
-        transcribedText = apiResult.text ?? apiResult.transcript ?? null;
-      }
-
-      // If no external API configured, try to use the audio metadata
-      // to create a placeholder that indicates manual review is needed
-      if (!transcribedText) {
-        // Estimate duration from file size (rough approximation for compressed audio)
-        // Average bitrate ~128kbps = 16KB/s for MP3, ~20KB/s for WebM
+        transcribedText = apiResult.text ?? "";
+        if (apiResult.duration) {
+          audioDuration = Math.round(apiResult.duration);
+        }
+      } else {
+        // No API key configured — placeholder so user can enter text manually
         const estimatedDuration = Math.round(fileSize / 16000);
+        audioDuration = estimatedDuration;
         const mins = Math.floor(estimatedDuration / 60);
         const secs = estimatedDuration % 60;
 
-        transcribedText = `[Transcription automatique non disponible]\n\n` +
-          `Fichier audio: ${audioPath.split("/").pop()}\n` +
+        transcribedText = `[Transcription automatique non disponible — clé API non configurée]\n\n` +
+          `Fichier audio: ${audioFileName}\n` +
           `Durée estimée: ${mins}m ${secs}s\n` +
           `Taille: ${(fileSize / 1024 / 1024).toFixed(2)} Mo\n\n` +
           `Veuillez saisir ou coller le texte de la transcription manuellement en cliquant sur "Saisir le texte".`;
@@ -100,7 +102,7 @@ Deno.serve(async (req: Request) => {
         .update({
           status: "completed",
           raw_text: transcribedText,
-          audio_duration: Math.round(fileSize / 16000),
+          audio_duration: audioDuration,
           updated_at: new Date().toISOString(),
         })
         .eq("id", transcriptionId);
