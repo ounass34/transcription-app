@@ -331,8 +331,23 @@ export default function TranscriptionDetail() {
                   </div>
                 </div>
               ) : rawText ? (
-                <div className="prose prose-sm max-w-none">
-                  <p className="text-neutral-700 whitespace-pre-wrap text-sm leading-relaxed">{rawText}</p>
+                <div className="space-y-3">
+                  {rawText.split('\n\n').map((paragraph, i) => {
+                    const tsMatch = paragraph.match(/^\[(\d{2}:\d{2})\]\s*(.*)$/s)
+                    if (tsMatch) {
+                      return (
+                        <div key={i} className="flex gap-3 items-start">
+                          <span className="flex-shrink-0 text-xs font-mono text-primary-600 bg-primary-50 rounded-md px-1.5 py-0.5 mt-0.5">
+                            {tsMatch[1]}
+                          </span>
+                          <p className="text-neutral-700 text-sm leading-relaxed whitespace-pre-wrap">{tsMatch[2]}</p>
+                        </div>
+                      )
+                    }
+                    return (
+                      <p key={i} className="text-neutral-700 whitespace-pre-wrap text-sm leading-relaxed">{paragraph}</p>
+                    )
+                  })}
                 </div>
               ) : null}
             </div>

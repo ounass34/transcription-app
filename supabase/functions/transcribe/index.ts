@@ -9,6 +9,12 @@ const corsHeaders = {
 const GROQ_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 const GROQ_MODEL = "whisper-large-v3-turbo";
 
+function formatTimestamp(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -62,6 +68,7 @@ Deno.serve(async (req: Request) => {
         formData.append("file", audioBlob, audioFileName);
         formData.append("model", GROQ_MODEL);
         formData.append("response_format", "verbose_json");
+        formData.append("timestamp_granularities[]", "segment");
         formData.append("language", "fr");
 
         const apiResponse = await fetch(GROQ_API_URL, {
@@ -78,9 +85,19 @@ Deno.serve(async (req: Request) => {
         }
 
         const apiResult = await apiResponse.json();
-        transcribedText = apiResult.text ?? "";
         if (apiResult.duration) {
           audioDuration = Math.round(apiResult.duration);
+        }
+
+        // Build structured text from segments with timestamps and paragraph breaks
+        const segments = apiResult.segments;
+        if (segments && Array.isArray(segments) && segments.length > 0) {
+          transcribedText = segments.map((seg: { start: number; end: number; text: string }) => {
+            const startStr = formatTimestamp(seg.start);
+            return `[${startStr}] ${seg.text.trim()}`;
+          }).join("\n\n");
+        } else {
+          transcribedText = apiResult.text ?? "";
         }
       } else {
         // No API key configured — placeholder so user can enter text manually
