@@ -42,6 +42,7 @@ export default function TranscriptionDetail() {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [audioLoading, setAudioLoading] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [audioDurationState, setAudioDurationState] = useState(0)
@@ -70,10 +71,16 @@ export default function TranscriptionDetail() {
 
       // Fetch audio URL for playback
       if (trans.audio_file_path) {
-        const { data: urlData } = await supabase.storage
+        setAudioLoading(true)
+        const { data: urlData, error: urlError } = await supabase.storage
           .from('audio_files')
           .createSignedUrl(trans.audio_file_path, 3600)
-        if (urlData?.signedUrl) setAudioUrl(urlData.signedUrl)
+        setAudioLoading(false)
+        if (urlError) {
+          console.error('Failed to create signed URL:', urlError)
+        } else if (urlData?.signedUrl) {
+          setAudioUrl(urlData.signedUrl)
+        }
       }
 
       const { data: reportsData } = await supabase
@@ -277,6 +284,12 @@ export default function TranscriptionDetail() {
       )}
 
       {/* Audio player */}
+      {audioLoading && (
+        <div className="bg-white rounded-2xl border border-neutral-100 p-4 mb-6 flex items-center gap-3">
+          <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+          <span className="text-sm text-neutral-500">Chargement de l'audio...</span>
+        </div>
+      )}
       {audioUrl && (
         <div className="bg-white rounded-2xl border border-neutral-100 p-4 mb-6">
           <audio
@@ -350,6 +363,8 @@ export default function TranscriptionDetail() {
               </span>
             </div>
           </div>
+          {/* Fallback native audio player */}
+          <audio src={audioUrl} controls className="w-full mt-3" />
         </div>
       )}
 
