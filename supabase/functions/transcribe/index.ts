@@ -6,14 +6,22 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const GROQ_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
-const GROQ_MODEL = "whisper-large-v3-turbo";
+const GROQ_WHISPER_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
+const GROQ_WHISPER_MODEL = "whisper-large-v3-turbo";
+const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_CHAT_MODEL = "llama-3.3-70b-versatile";
 
-function formatTimestamp(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-}
+const STRUCTURE_PROMPT = `Tu es un assistant qui structure des transcriptions audio. Voici une transcription brute en français. Organise ce texte en paragraphes logiques basés sur le contenu et le sens, pas sur les pauses ou les horodatages.
+
+Règles:
+- Regroupe les idées qui vont ensemble dans un même paragraphe
+- Sépare les paragraphes par une ligne vide
+- Ne change pas les mots, ne corrige pas, ne résume pas
+- Ne mets PAS de titres, de numérotation, de puces ou de balises
+- Ne mets PAS d'horodatages
+- Garde le texte exact mais réorganise-le en paragraphes cohérents
+- Si le texte est déjà court, garde-le tel quel
+- Réponds uniquement avec le texte structuré, rien d'autre`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -63,15 +71,14 @@ Deno.serve(async (req: Request) => {
       let audioDuration: number | null = null;
 
       if (groqApiKey) {
-        // Send audio to Groq Whisper API for transcription
+        // Step 1: Transcribe audio with Whisper (plain text, no segments)
         const formData = new FormData();
         formData.append("file", audioBlob, audioFileName);
-        formData.append("model", GROQ_MODEL);
+        formData.append("model", GROQ_WHISPER_MODEL);
         formData.append("response_format", "verbose_json");
-        formData.append("timestamp_granularities[]", "segment");
         formData.append("language", "fr");
 
-        const apiResponse = await fetch(GROQ_API_URL, {
+        const apiResponse = await fetch(GROQ_WHISPER_URL, {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${groqApiKey}`,
@@ -81,7 +88,7 @@ Deno.serve(async (req: Request) => {
 
         if (!apiResponse.ok) {
           const errBody = await apiResponse.text();
-          throw new Error(`Groq API error (${apiResponse.status}): ${errBody}`);
+          throw new Error(`Groq Whisper API error (${apiResponse.status}): ${errBody}`);
         }
 
         const apiResult = await apiResponse.json();
@@ -89,15 +96,37 @@ Deno.serve(async (req: Request) => {
           audioDuration = Math.round(apiResult.duration);
         }
 
-        // Build structured text from segments with timestamps and paragraph breaks
-        const segments = apiResult.segments;
-        if (segments && Array.isArray(segments) && segments.length > 0) {
-          transcribedText = segments.map((seg: { start: number; end: number; text: string }) => {
-            const startStr = formatTimestamp(seg.start);
-            return `[${startStr}] ${seg.text.trim()}`;
-          }).join("\n\n");
+        const rawText = apiResult.text ?? "";
+
+        // Step 2: Structure the text with an LLM based on content logic
+        if (rawText.trim().length > 0) {
+          const chatResponse = await fetch(GROQ_CHAT_URL, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${groqApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: GROQ_CHAT_MODEL,
+              messages: [
+                { role: "system", content: STRUCTURE_PROMPT },
+                { role: "user", content: rawText },
+              ],
+              temperature: 0.2,
+              max_tokens: 4096,
+            }),
+          });
+
+          if (chatResponse.ok) {
+            const chatResult = await chatResponse.json();
+            const structuredText = chatResult.choices?.[0]?.message?.content?.trim();
+            transcribedText = structuredText || rawText;
+          } else {
+            // If LLM structuring fails, fall back to raw text
+            transcribedText = rawText;
+          }
         } else {
-          transcribedText = apiResult.text ?? "";
+          transcribedText = "";
         }
       } else {
         // No API key configured — placeholder so user can enter text manually
