@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Loader as Loader2, FileText, FileAudio, Clock, Plus, Trash2, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Download, Sparkles, FileSpreadsheet, FileType } from 'lucide-react'
+import { ArrowLeft, Loader as Loader2, FileText, FileAudio, Clock, Plus, Trash2, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Download, Sparkles, FileSpreadsheet, FileType, Play, Pause, SkipBack, SkipForward } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import type { Transcription, Template, Report, ReportFormat } from '../types'
@@ -16,6 +16,13 @@ function formatDuration(seconds: number | null): string {
   const mins = Math.floor(seconds / 60)
   const secs = Math.floor(seconds % 60)
   return `${mins}m ${secs}s`
+}
+
+function formatTime(seconds: number): string {
+  if (!seconds || isNaN(seconds)) return '0:00'
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
 export default function TranscriptionDetail() {
@@ -34,6 +41,11 @@ export default function TranscriptionDetail() {
   const [reportFormat, setReportFormat] = useState<ReportFormat>('structured')
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [audioDurationState, setAudioDurationState] = useState(0)
+  const audioRef = useRef<HTMLAudioElement>(null)
 
   useEffect(() => {
     if (!id) return
@@ -55,6 +67,14 @@ export default function TranscriptionDetail() {
 
       setTranscription(trans)
       setRawText(trans.raw_text ?? '')
+
+      // Fetch audio URL for playback
+      if (trans.audio_file_path) {
+        const { data: urlData } = await supabase.storage
+          .from('audio_files')
+          .createSignedUrl(trans.audio_file_path, 3600)
+        if (urlData?.signedUrl) setAudioUrl(urlData.signedUrl)
+      }
 
       const { data: reportsData } = await supabase
         .from('reports')
@@ -256,6 +276,83 @@ export default function TranscriptionDetail() {
         </div>
       )}
 
+      {/* Audio player */}
+      {audioUrl && (
+        <div className="bg-white rounded-2xl border border-neutral-100 p-4 mb-6">
+          <audio
+            ref={audioRef}
+            src={audioUrl}
+            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+            onLoadedMetadata={(e) => setAudioDurationState(e.currentTarget.duration)}
+            onEnded={() => setIsPlaying(false)}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            className="hidden"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                const a = audioRef.current
+                if (!a) return
+                a.currentTime = Math.max(0, a.currentTime - 10)
+              }}
+              className="p-2 rounded-lg text-neutral-500 hover:text-primary-600 hover:bg-primary-50 transition-all"
+              title="Reculer de 10s"
+            >
+              <SkipBack className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => {
+                const a = audioRef.current
+                if (!a) return
+                if (isPlaying) {
+                  a.pause()
+                } else {
+                  a.play()
+                }
+              }}
+              className="w-11 h-11 rounded-full bg-primary-600 text-white flex items-center justify-center hover:bg-primary-700 transition-all flex-shrink-0"
+            >
+              {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+            </button>
+            <button
+              onClick={() => {
+                const a = audioRef.current
+                if (!a) return
+                a.currentTime = Math.min(a.duration || 0, a.currentTime + 10)
+              }}
+              className="p-2 rounded-lg text-neutral-500 hover:text-primary-600 hover:bg-primary-50 transition-all"
+              title="Avancer de 10s"
+            >
+              <SkipForward className="w-4 h-4" />
+            </button>
+            <div className="flex-1 flex items-center gap-3 min-w-0">
+              <span className="text-xs font-mono text-neutral-400 flex-shrink-0">
+                {formatTime(currentTime)}
+              </span>
+              <div
+                className="flex-1 h-1.5 bg-neutral-200 rounded-full cursor-pointer relative group"
+                onClick={(e) => {
+                  const a = audioRef.current
+                  if (!a || !a.duration) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const pct = (e.clientX - rect.left) / rect.width
+                  a.currentTime = pct * a.duration
+                }}
+              >
+                <div
+                  className="absolute left-0 top-0 h-full bg-primary-500 rounded-full transition-all"
+                  style={{ width: `${audioDurationState ? (currentTime / audioDurationState) * 100 : 0}%` }}
+                />
+              </div>
+              <span className="text-xs font-mono text-neutral-400 flex-shrink-0">
+                {formatTime(audioDurationState)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Transcription text */}
         <div className="lg:col-span-2">
@@ -331,23 +428,10 @@ export default function TranscriptionDetail() {
                   </div>
                 </div>
               ) : rawText ? (
-                <div className="space-y-3">
-                  {rawText.split('\n\n').map((paragraph, i) => {
-                    const tsMatch = paragraph.match(/^\[(\d{2}:\d{2})\]\s*(.*)$/s)
-                    if (tsMatch) {
-                      return (
-                        <div key={i} className="flex gap-3 items-start">
-                          <span className="flex-shrink-0 text-xs font-mono text-primary-600 bg-primary-50 rounded-md px-1.5 py-0.5 mt-0.5">
-                            {tsMatch[1]}
-                          </span>
-                          <p className="text-neutral-700 text-sm leading-relaxed whitespace-pre-wrap">{tsMatch[2]}</p>
-                        </div>
-                      )
-                    }
-                    return (
-                      <p key={i} className="text-neutral-700 whitespace-pre-wrap text-sm leading-relaxed">{paragraph}</p>
-                    )
-                  })}
+                <div className="space-y-4">
+                  {rawText.split('\n\n').filter((p) => p.trim()).map((paragraph, i) => (
+                    <p key={i} className="text-neutral-700 whitespace-pre-wrap text-sm leading-relaxed">{paragraph}</p>
+                  ))}
                 </div>
               ) : null}
             </div>
